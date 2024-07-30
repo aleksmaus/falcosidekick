@@ -18,6 +18,7 @@ import (
 	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/spf13/viper"
 
+	"github.com/falcosecurity/falcosidekick/outputs"
 	"github.com/falcosecurity/falcosidekick/types"
 )
 
@@ -725,6 +726,22 @@ func getConfig() *types.Configuration {
 	}
 	if c.Elasticsearch.NumberOfShards <= 0 {
 		c.Elasticsearch.NumberOfShards = 3
+	}
+
+	// If datastream dataset is set overwrite the index name
+	// also set Suffix to None
+	if c.Elasticsearch.Datastream.Dataset != "" {
+		typ := c.Elasticsearch.Datastream.Type
+		ns := c.Elasticsearch.Datastream.Namespace
+		if typ == "" {
+			typ = "logs"
+		}
+		if ns == "" {
+			ns = "default"
+		}
+		c.Elasticsearch.Index = fmt.Sprintf("%s-%s-%s", typ, c.Elasticsearch.Datastream.Dataset, ns)
+
+		c.Elasticsearch.Suffix = outputs.None
 	}
 
 	if c.Prometheus.ExtraLabels != "" {

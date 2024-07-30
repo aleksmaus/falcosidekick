@@ -263,6 +263,12 @@ type AlertmanagerOutputConfig struct {
 	CustomHeaders            map[string]string
 }
 
+type ElasticsearchOutputDatastreamConfig struct {
+	Type      string `json:"type" yaml:"type"`
+	Dataset   string `json:"dataset" yaml:"dataset"`
+	Namespace string `json:"namespace" yaml:"namespace"`
+}
+
 type ElasticsearchOutputConfig struct {
 	HostPort            string
 	Index               string
@@ -278,6 +284,7 @@ type ElasticsearchOutputConfig struct {
 	CheckCert           bool
 	MutualTLS           bool
 	CustomHeaders       map[string]string
+	Datastream          ElasticsearchOutputDatastreamConfig
 }
 
 type QuickwitOutputConfig struct {

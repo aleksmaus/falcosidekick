@@ -14,8 +14,19 @@ import (
 	"github.com/falcosecurity/falcosidekick/types"
 )
 
-type eSPayload struct {
+type falcoWithDatastreamPayload struct {
 	types.FalcoPayload
+	Datastream eSDatastream `json:"data_stream,omitempty"`
+}
+
+type eSDatastream struct {
+	Type      string `json:"type"`
+	Dataset   string `json:"dataset"`
+	Namespace string `json:"namespace"`
+}
+
+type eSPayload struct {
+	falcoWithDatastreamPayload
 	Timestamp time.Time `json:"@timestamp"`
 }
 
@@ -66,7 +77,19 @@ func (c *Client) ElasticsearchPost(falcopayload types.FalcoPayload) {
 		c.AddHeader(i, j)
 	}
 
-	payload := eSPayload{FalcoPayload: falcopayload, Timestamp: falcopayload.Time}
+	fds := falcoWithDatastreamPayload{
+		FalcoPayload: falcopayload,
+	}
+
+	if c.Config.Elasticsearch.Datastream.Dataset != "" {
+		fds.Datastream = eSDatastream{
+			Type:      c.Config.Elasticsearch.Datastream.Type,
+			Dataset:   c.Config.Elasticsearch.Datastream.Dataset,
+			Namespace: c.Config.Elasticsearch.Datastream.Namespace,
+		}
+	}
+
+	payload := eSPayload{falcoWithDatastreamPayload: fds, Timestamp: falcopayload.Time}
 	if c.Config.Elasticsearch.FlattenFields || c.Config.Elasticsearch.CreateIndexTemplate {
 		for i, j := range payload.OutputFields {
 			payload.OutputFields[strings.ReplaceAll(i, ".", "_")] = j
