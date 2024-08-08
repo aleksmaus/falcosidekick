@@ -133,6 +133,9 @@ type Client struct {
 	httpcli *http.Client
 	// lock for http client creation
 	mx sync.Mutex
+
+	// Elasticsearch output batcher
+	esBatcher *ElasticsearchBatcher
 }
 
 // InitClient returns a new output.Client for accessing the different API.
@@ -151,7 +154,13 @@ func NewClient(outputType string, defaultEndpointURL string, mutualTLSEnabled bo
 		log.Printf("[ERROR] : %v - %v\n", outputType, err.Error())
 		return nil, ErrClientCreation
 	}
-	return &Client{OutputType: outputType, EndpointURL: endpointURL, MutualTLSEnabled: mutualTLSEnabled, CheckCert: checkCert, HeaderList: []Header{}, ContentType: DefaultContentType, Config: params.Config, Stats: params.Stats, PromStats: params.PromStats, StatsdClient: params.StatsdClient, DogstatsdClient: params.DogstatsdClient}, nil
+	c := &Client{OutputType: outputType, EndpointURL: endpointURL, MutualTLSEnabled: mutualTLSEnabled, CheckCert: checkCert, HeaderList: []Header{}, ContentType: DefaultContentType, Config: params.Config, Stats: params.Stats, PromStats: params.PromStats, StatsdClient: params.StatsdClient, DogstatsdClient: params.DogstatsdClient}
+
+	// Set up Elasticsearch batcher with the callback
+	c.esBatcher = NewElasticseachBatcher()
+	c.esBatcher.callback = c.elasticsearchBulkPost
+
+	return c, nil
 }
 
 // Get get a payload from Output with GET http method.
@@ -195,7 +204,7 @@ func (c *Client) sendRequest(method string, payload interface{}) error {
 	}(c)
 
 	body := new(bytes.Buffer)
-	switch payload.(type) {
+	switch v := payload.(type) {
 	case influxdbPayload:
 		fmt.Fprintf(body, "%v", payload)
 		if c.Config.Debug {
@@ -212,6 +221,11 @@ func (c *Client) sendRequest(method string, payload interface{}) error {
 			if err := json.NewEncoder(debugBody).Encode(payload); err == nil {
 				log.Printf("[DEBUG] : %v payload : %v\n", c.OutputType, debugBody)
 			}
+		}
+	case []byte:
+		body = bytes.NewBuffer(v)
+		if c.Config.Debug {
+			log.Printf("[DEBUG] : %v payload : %v\n", c.OutputType, string(v))
 		}
 	default:
 		if err := json.NewEncoder(body).Encode(payload); err != nil {
@@ -258,6 +272,7 @@ func (c *Client) sendRequest(method string, payload interface{}) error {
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent: //200, 201, 202, 204
 		log.Printf("[INFO]  : %v - %v OK (%v)\n", c.OutputType, method, resp.StatusCode)
+		log.Printf("[INFO] : %v\n", getInlinedBodyAsString(resp))
 		if ot := c.OutputType; ot == Kubeless || ot == Openfaas || ot == Fission {
 			log.Printf("[INFO]  : %v - Function Response : %s\n", ot, getInlinedBodyAsString(resp))
 		}

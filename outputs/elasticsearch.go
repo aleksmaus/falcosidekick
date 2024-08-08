@@ -31,21 +31,53 @@ type mappingError struct {
 	Status int `json:"status"`
 }
 
-// ElasticsearchPost posts event to Elasticsearch
 func (c *Client) ElasticsearchPost(falcopayload types.FalcoPayload) {
-	c.Stats.Elasticsearch.Add(Total, 1)
+	batchingEnabled := true
 
 	current := time.Now()
-	var eURL string
+
+	var index string
 	switch c.Config.Elasticsearch.Suffix {
 	case None:
-		eURL = c.Config.Elasticsearch.HostPort + "/" + c.Config.Elasticsearch.Index + "/" + c.Config.Elasticsearch.Type
+		index = c.Config.Elasticsearch.Index
 	case "monthly":
-		eURL = c.Config.Elasticsearch.HostPort + "/" + c.Config.Elasticsearch.Index + "-" + current.Format("2006.01") + "/" + c.Config.Elasticsearch.Type
+		index = c.Config.Elasticsearch.Index + "-" + current.Format("2006.01")
 	case "annually":
-		eURL = c.Config.Elasticsearch.HostPort + "/" + c.Config.Elasticsearch.Index + "-" + current.Format("2006") + "/" + c.Config.Elasticsearch.Type
+		index = c.Config.Elasticsearch.Index + "-" + current.Format("2006")
 	default:
-		eURL = c.Config.Elasticsearch.HostPort + "/" + c.Config.Elasticsearch.Index + "-" + current.Format("2006.01.02") + "/" + c.Config.Elasticsearch.Type
+		index = c.Config.Elasticsearch.Index + "-" + current.Format("2006.01.02")
+	}
+
+	payload := eSPayload{FalcoPayload: falcopayload, Timestamp: falcopayload.Time}
+
+	if c.Config.Elasticsearch.FlattenFields || c.Config.Elasticsearch.CreateIndexTemplate {
+		for i, j := range payload.OutputFields {
+			payload.OutputFields[strings.ReplaceAll(i, ".", "_")] = j
+			delete(payload.OutputFields, i)
+		}
+	}
+
+	if batchingEnabled {
+		c.esBatcher.Push(index, payload)
+		return
+	}
+
+	c.elasticsearchPost(index, payload)
+}
+
+func (c *Client) elasticsearchBulkPost(payload []byte) {
+	c.elasticsearchPost("", payload)
+}
+
+// ElasticsearchPost posts event to Elasticsearch
+func (c *Client) elasticsearchPost(index string, payload interface{}) {
+	c.Stats.Elasticsearch.Add(Total, 1)
+
+	var eURL string
+	if index == "" {
+		eURL = c.Config.Elasticsearch.HostPort + "/_bulk"
+	} else {
+		eURL = c.Config.Elasticsearch.HostPort + "/" + index + "/" + c.Config.Elasticsearch.Type
 	}
 
 	endpointURL, err := url.Parse(eURL)
@@ -64,14 +96,6 @@ func (c *Client) ElasticsearchPost(falcopayload types.FalcoPayload) {
 
 	for i, j := range c.Config.Elasticsearch.CustomHeaders {
 		c.AddHeader(i, j)
-	}
-
-	payload := eSPayload{FalcoPayload: falcopayload, Timestamp: falcopayload.Time}
-	if c.Config.Elasticsearch.FlattenFields || c.Config.Elasticsearch.CreateIndexTemplate {
-		for i, j := range payload.OutputFields {
-			payload.OutputFields[strings.ReplaceAll(i, ".", "_")] = j
-			delete(payload.OutputFields, i)
-		}
 	}
 
 	err = c.Post(payload)
@@ -94,18 +118,19 @@ func (c *Client) ElasticsearchPost(falcopayload types.FalcoPayload) {
 			}
 			s := strings.ReplaceAll(k[0], "[output_fields.", "")
 			s = strings.ReplaceAll(s, "]", "")
-			for i := range payload.OutputFields {
-				if strings.HasPrefix(i, s) {
-					delete(payload.OutputFields, i)
-				}
-			}
-			fmt.Println(payload.OutputFields)
-			log.Printf("[INFO]  : %v - %v\n", c.OutputType, "attempt to POST again the payload without the wrong field")
-			err = c.Post(payload)
-			if err != nil {
-				c.setElasticSearchErrorMetrics()
-				return
-			}
+			// TODO:
+			// for i := range payload.OutputFields {
+			// 	if strings.HasPrefix(i, s) {
+			// 		delete(payload.OutputFields, i)
+			// 	}
+			// }
+			// fmt.Println(payload.OutputFields)
+			// log.Printf("[INFO]  : %v - %v\n", c.OutputType, "attempt to POST again the payload without the wrong field")
+			// err = c.Post(payload)
+			// if err != nil {
+			// 	c.setElasticSearchErrorMetrics()
+			// 	return
+			// }
 		}
 	}
 
